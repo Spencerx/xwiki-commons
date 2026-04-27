@@ -48,13 +48,13 @@ public class JavascriptImportmapParser
      * Parse an importmap declaration.
      *
      * @param importMapJSON the importmap declaration as a JSON string
-     * @return the resolve mapping of importmap module id and their corresponding {@link WebjarPathDescriptor}
+     * @return the resolve mapping of importmap module id and their corresponding {@link ImportmapPathDescriptor}
      *     definitions
      * @throws JavascriptImportmapException in case of issue when parsing the provided JSON string
      */
-    public Map<String, WebjarPathDescriptor> parse(String importMapJSON) throws JavascriptImportmapException
+    public Map<String, ImportmapPathDescriptor> parse(String importMapJSON) throws JavascriptImportmapException
     {
-        Map<String, WebjarPathDescriptor> extensionImportMap;
+        Map<String, ImportmapPathDescriptor> extensionImportMap;
         Object parsedJSON;
         try {
             parsedJSON = OBJECT_MAPPER.readValue(importMapJSON, Object.class);
@@ -67,6 +67,10 @@ public class JavascriptImportmapParser
                 Object value = o.getValue();
                 var key = String.valueOf(o.getKey());
                 if (value instanceof Map valueMap) {
+                    boolean eager = Boolean.parseBoolean(String.valueOf(valueMap.getOrDefault("eager",
+                        Boolean.FALSE.toString())));
+                    boolean anonymous = Boolean.parseBoolean(String.valueOf(valueMap.getOrDefault("anonymous",
+                        Boolean.FALSE.toString())));
                     WebjarPathDescriptor webjarPathDescriptor;
                     try {
                         webjarPathDescriptor = new WebjarPathDescriptor(
@@ -77,22 +81,30 @@ public class JavascriptImportmapParser
                     } catch (NullPointerException | IllegalArgumentException e) {
                         throw new JavascriptImportmapException("Malformed value for key [%s]".formatted(key), e);
                     }
-                    extensionImportMap.put(key, webjarPathDescriptor);
+                    ImportmapPathDescriptor importmapPathDescriptor = new ImportmapPathDescriptor(
+                        webjarPathDescriptor, eager, anonymous);
+                    extensionImportMap.put(key, importmapPathDescriptor);
                 } else {
-                    extensionImportMap.put(key, parseValue(String.valueOf(value)));
+                    var anonymous = key.startsWith("_");
+                    extensionImportMap.put(anonymous ? key.substring(1) : key, parseValue(String.valueOf(value),
+                        anonymous));
                 }
             }
         }
         return extensionImportMap;
     }
 
-    private WebjarPathDescriptor parseValue(String value) throws JavascriptImportmapException
+    private ImportmapPathDescriptor parseValue(String value, boolean anonymous) throws JavascriptImportmapException
     {
         var separator = "/";
         if (!value.contains(separator)) {
             throw new JavascriptImportmapException("Invalid importmap value: %s".formatted(value));
         }
-        var split = value.split(separator, 2);
-        return new WebjarPathDescriptor(split[0], split[1]);
+        var eager = value.startsWith("!");
+        var split = (eager ? value.substring(1) : value).split(separator, 2);
+        var webjarId = split[0];
+        var path = split[1];
+
+        return new ImportmapPathDescriptor(new WebjarPathDescriptor(webjarId, path), eager, anonymous);
     }
 }

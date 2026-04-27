@@ -71,6 +71,9 @@ public record WebjarPathDescriptor(String webjarId, String namespace, String pat
         if (path.isBlank()) {
             throw new IllegalArgumentException("path cannot be the blank");
         }
+        if (params == null) {
+            params = Map.of();
+        }
     }
 
     /**
