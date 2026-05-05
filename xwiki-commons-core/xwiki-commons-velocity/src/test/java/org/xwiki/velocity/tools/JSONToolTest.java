@@ -21,8 +21,6 @@ package org.xwiki.velocity.tools;
 
 import java.beans.Transient;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,12 +73,12 @@ class JSONToolTest
 
         public List<String> getItems()
         {
-            return Arrays.asList("one");
+            return List.of("one");
         }
 
         public Map<String, String> getParameters()
         {
-            return Collections.singletonMap("foo", "bar");
+            return Map.of("foo", "bar");
         }
 
         @Transient
@@ -110,8 +108,8 @@ class JSONToolTest
         map.put("double", 0.78);
         map.put("string", "foo");
         map.put("array", new int[] { 9, 8 });
-        map.put("list", Arrays.asList("one", "two"));
-        map.put("map", Collections.singletonMap("level2", true));
+        map.put("list", List.of("one", "two"));
+        map.put("map", Map.of("level2", true));
         map.put("null", "null key value");
 
         String json = this.tool.serialize(map);
@@ -129,7 +127,7 @@ class JSONToolTest
     @Test
     void serializeList()
     {
-        assertEquals("[1,2]", this.tool.serialize(Arrays.asList(1, 2)));
+        assertEquals("[1,2]", this.tool.serialize(List.of(1, 2)));
         assertEquals("[1.3,2.4]", this.tool.serialize(new double[] { 1.3, 2.4 }));
     }
 
@@ -181,7 +179,7 @@ class JSONToolTest
     @Test
     void fromStringArray()
     {
-        assertEquals(Arrays.asList(1, 2, 3), this.tool.fromString("[1,2,3]"));
+        assertEquals(List.of(1, 2, 3), this.tool.fromString("[1,2,3]"));
     }
 
     @Test
@@ -197,7 +195,7 @@ class JSONToolTest
 
         assertEquals(3, map.size());
         assertEquals(1, map.get("a"));
-        assertEquals(Arrays.asList(1), map.get("b"));
+        assertEquals(List.of(1), map.get("b"));
         assertEquals(true, map.get("c"));
     }
 
@@ -253,7 +251,7 @@ class JSONToolTest
         object.put("a", "b");
         object.put("c", true);
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("before", Collections.singletonList("nothing"));
+        map.put("before", List.of("nothing"));
         map.put("json", object);
         map.put("after", 42);
         // assertEquals(variants.get(0), this.tool.serialize(map));
@@ -278,7 +276,7 @@ class JSONToolTest
         array.put(42);
         array.put(true);
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("before", Collections.singletonList("nothing"));
+        map.put("before", List.of("nothing"));
         map.put("json", array);
         map.put("after", 42);
         assertEquals("{\"before\":[\"nothing\"],\"json\":[\"a\",42,true],\"after\":42}",
