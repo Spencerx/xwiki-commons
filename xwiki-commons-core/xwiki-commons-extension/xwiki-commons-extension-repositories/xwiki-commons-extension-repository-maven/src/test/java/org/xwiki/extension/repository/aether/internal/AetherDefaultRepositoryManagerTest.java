@@ -26,7 +26,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -36,9 +35,9 @@ import org.apache.commons.io.IOUtils;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.graph.Dependency;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.xwiki.environment.Environment;
 import org.xwiki.extension.DefaultExtensionAuthor;
 import org.xwiki.extension.DefaultExtensionDependency;
@@ -52,26 +51,31 @@ import org.xwiki.extension.ResolveException;
 import org.xwiki.extension.repository.ExtensionRepositoryDescriptor;
 import org.xwiki.extension.repository.ExtensionRepositoryManager;
 import org.xwiki.extension.repository.result.IterableResult;
-import org.xwiki.extension.test.MockitoRepositoryUtilsRule;
+import org.xwiki.extension.test.MockitoRepositoryUtilsExtension;
 import org.xwiki.extension.version.Version;
 import org.xwiki.extension.version.internal.DefaultVersionConstraint;
 import org.xwiki.test.annotation.AllComponents;
+import org.xwiki.test.junit5.mockito.ComponentTest;
+import org.xwiki.test.junit5.mockito.InjectComponentManager;
+import org.xwiki.test.mockito.MockitoComponentManager;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+@ComponentTest
+@ExtendWith(MockitoRepositoryUtilsExtension.class)
 @AllComponents
-public class AetherDefaultRepositoryManagerTest
+class AetherDefaultRepositoryManagerTest
 {
     private static final String GROUPID = "groupid";
 
     private static final String ARTIFACTID = "artifactid";
 
-    @Rule
-    public MockitoRepositoryUtilsRule repositoryUtil = new MockitoRepositoryUtilsRule();
+    @InjectComponentManager
+    private MockitoComponentManager componentManager;
 
     private ExtensionRepositoryManager repositoryManager;
 
@@ -101,8 +105,12 @@ public class AetherDefaultRepositoryManagerTest
 
     private Environment environment;
 
-    @Before
-    public void setUp() throws Exception
+    private File mavenRepository;
+
+    private File mavenUnknownRepository;
+
+    @BeforeEach
+    void setUp() throws Exception
     {
         this.extensionId = new ExtensionId(GROUPID + ':' + ARTIFACTID, "version");
         this.snapshotExtensionId = new ExtensionId(GROUPID + ':' + ARTIFACTID, "1.0-SNAPSHOT");
@@ -125,16 +133,18 @@ public class AetherDefaultRepositoryManagerTest
 
         // lookup
 
-        this.repositoryManager =
-            this.repositoryUtil.getComponentManager().getInstance(ExtensionRepositoryManager.class);
-        this.extensionLicenseManager =
-            this.repositoryUtil.getComponentManager().getInstance(ExtensionLicenseManager.class);
-        this.environment =
-            this.repositoryUtil.getComponentManager().getInstance(Environment.class);
+        this.repositoryManager = this.componentManager.getInstance(ExtensionRepositoryManager.class);
+        this.extensionLicenseManager = this.componentManager.getInstance(ExtensionLicenseManager.class);
+        this.environment = this.componentManager.getInstance(Environment.class);
+
+        // Derive repository paths from the environment (set up by MockitoRepositoryUtilsExtension)
+        File repositoriesRoot = new File(this.environment.getPermanentDirectory(), "repositories");
+        this.mavenRepository = new File(repositoriesRoot, "maven");
+        this.mavenUnknownRepository = new File(repositoriesRoot, "mavenunknown");
     }
 
     @Test
-    public void testResolve() throws ResolveException, IOException
+    void resolve() throws ResolveException, IOException
     {
         Extension extension = this.repositoryManager.resolve(this.extensionId);
 
@@ -142,22 +152,20 @@ public class AetherDefaultRepositoryManagerTest
         assertEquals(this.extensionId.getId(), extension.getId().getId());
         assertEquals(this.extensionId.getVersion(), extension.getId().getVersion());
         assertEquals("type", extension.getType());
-        assertEquals(this.repositoryUtil.getMavenRepositoryId(),
-            extension.getRepository().getDescriptor().getId());
+        assertEquals("test-maven", extension.getRepository().getDescriptor().getId());
         assertEquals("name", extension.getName());
         assertEquals("summary", extension.getSummary());
         assertEquals("http://website", extension.getWebSite());
         assertEquals("category", extension.getCategory());
-        assertEquals(Arrays.asList(new DefaultExtensionAuthor("Full Name", "http://profile")),
+        assertEquals(List.of(new DefaultExtensionAuthor("Full Name", "http://profile")),
             new ArrayList<>(extension.getAuthors()));
-        assertEquals(new HashSet<>(Arrays.asList("groupid1:feature1", "groupid2:feature2")),
+        assertEquals(new HashSet<>(List.of("groupid1:feature1", "groupid2:feature2")),
             new HashSet<>(extension.getFeatures()));
         assertEquals(
-            new HashSet<>(Arrays.asList(new ExtensionId("groupid1:feature1", this.extensionId.getVersion()),
+            new HashSet<>(List.of(new ExtensionId("groupid1:feature1", this.extensionId.getVersion()),
                 new ExtensionId("groupid2:feature2", "42"))),
             new HashSet<>(extension.getExtensionFeatures()));
-        assertEquals(new HashSet<>(Arrays.asList("namespace1", "{root}")),
-            new HashSet<>(extension.getAllowedNamespaces()));
+        assertEquals(new HashSet<>(List.of("namespace1", "{root}")), new HashSet<>(extension.getAllowedNamespaces()));
         assertSame(this.extensionLicenseManager.getLicense("GNU Lesser General Public License 2.1"),
             extension.getLicenses().iterator().next());
 
@@ -189,11 +197,10 @@ public class AetherDefaultRepositoryManagerTest
 
         // check that a new resolve of an already resolved extension provide the proper repository
         extension = this.repositoryManager.resolve(this.extensionId);
-        assertEquals(this.repositoryUtil.getMavenRepositoryId(),
-            extension.getRepository().getDescriptor().getId());
+        assertEquals("test-maven", extension.getRepository().getDescriptor().getId());
 
         // Modify the file on the descriptor on the repository
-        File pomFile = new File(this.repositoryUtil.getMavenRepository(),
+        File pomFile = new File(this.mavenRepository,
             this.extensionId.getId().replace('.', '/').replace(':', '/') + '/' + this.extensionId.getVersion() + '/'
                 + ARTIFACTID + '-' + this.extensionId.getVersion() + ".pom");
         FileUtils.writeStringToFile(pomFile, FileUtils.readFileToString(pomFile, "UTF-8")
@@ -207,7 +214,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolvePOM() throws ResolveException, IOException
+    void resolvePOM() throws ResolveException
     {
         Extension extension = this.repositoryManager.resolve(new ExtensionId("groupid:pom", "version"));
 
@@ -216,7 +223,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveNonDefaultTypeDependency() throws ResolveException, IOException
+    void resolveNonDefaultTypeDependency() throws ResolveException
     {
         Extension extension =
             this.repositoryManager.resolve(new ExtensionId("groupid:nondefaulttypedependency", "version"));
@@ -234,7 +241,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveSNAPSHOT() throws ResolveException
+    void resolveSNAPSHOT() throws ResolveException
     {
         Extension extension = this.repositoryManager.resolve(this.snapshotExtensionId);
 
@@ -242,12 +249,12 @@ public class AetherDefaultRepositoryManagerTest
         assertEquals(this.snapshotExtensionId.getId(), extension.getId().getId());
         assertEquals(this.snapshotExtensionId.getVersion(), extension.getId().getVersion());
         assertEquals("type", extension.getType());
-        assertEquals(this.repositoryUtil.getMavenRepositoryId(),
+        assertEquals("test-maven",
             extension.getRepository().getDescriptor().getId());
     }
 
     @Test
-    public void testResolveAetherDependency() throws ResolveException
+    void resolveAetherDependency() throws ResolveException
     {
         Artifact artifact = new DefaultArtifact("groupid", "artifactid", "", "type", "version");
         Dependency aetherDependency = new Dependency(artifact, null);
@@ -262,7 +269,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveAetherDependencySNAPSHOT() throws ResolveException
+    void resolveAetherDependencySNAPSHOT() throws ResolveException
     {
         Artifact artifact = new DefaultArtifact("groupid", "artifactid", "", "type", "1.0-SNAPSHOT");
         Dependency aetherDependency = new Dependency(artifact, null);
@@ -274,12 +281,12 @@ public class AetherDefaultRepositoryManagerTest
         assertEquals(this.snapshotExtensionId.getId(), extension.getId().getId());
         assertEquals(this.snapshotExtensionId.getVersion(), extension.getId().getVersion());
         assertEquals("type", extension.getType());
-        assertEquals(this.repositoryUtil.getMavenRepositoryId(),
+        assertEquals("test-maven",
             extension.getRepository().getDescriptor().getId());
     }
 
     @Test
-    public void testResolveAetherDependencyRange() throws ResolveException
+    void resolveAetherDependencyRange() throws ResolveException
     {
         Artifact artifact = new DefaultArtifact("groupid", "artifactid", "", "type", "[1.0,)");
         Dependency aetherDependency = new Dependency(artifact, null);
@@ -293,7 +300,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveAetherDependencyRange2() throws ResolveException
+    void resolveAetherDependencyRange2() throws ResolveException
     {
         Artifact artifact = new DefaultArtifact("groupid", "artifactid", "", "type", "[1.0,2.0)");
         Dependency aetherDependency = new Dependency(artifact, null);
@@ -307,7 +314,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveOverriddenProperties() throws ResolveException
+    void resolveOverriddenProperties() throws ResolveException
     {
         Extension extension = this.repositoryManager.resolve(new ExtensionId("groupid:oartifactid", "version"));
 
@@ -322,7 +329,7 @@ public class AetherDefaultRepositoryManagerTest
      * actual pom version.
      */
     @Test
-    public void testResolveWithVersionAsSystemProperty() throws ResolveException
+    void resolveWithVersionAsSystemProperty() throws ResolveException
     {
         System.setProperty("version", "systemversion");
         System.setProperty("groupId", "systemgroupId");
@@ -339,7 +346,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveVersionRange() throws ResolveException
+    void resolveVersionRange() throws ResolveException
     {
         Extension extension = this.repositoryManager.resolve(this.dependencyExtensionIdRange);
 
@@ -349,7 +356,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveVersionRangeWithNoResult()
+    void resolveVersionRangeWithNoResult()
     {
         assertThrows(ExtensionNotFoundException.class,
             () -> this.repositoryManager.resolve(new DefaultExtensionDependency(this.extensionDependencyId.getId(),
@@ -357,7 +364,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownload() throws ExtensionException, IOException
+    void download() throws ExtensionException, IOException
     {
         Extension extension = this.repositoryManager.resolve(this.extensionId);
 
@@ -367,7 +374,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadSNAPSHOT() throws ExtensionException, IOException
+    void downloadSNAPSHOT() throws ExtensionException, IOException
     {
         Extension extension = this.repositoryManager.resolve(this.snapshotExtensionId);
 
@@ -377,7 +384,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadClassifier() throws ExtensionException, IOException
+    void downloadClassifier() throws ExtensionException, IOException
     {
         Extension extension = this.repositoryManager.resolve(this.extensionIdClassifier);
 
@@ -392,7 +399,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadClassifierDependency() throws ResolveException, IOException
+    void downloadClassifierDependency() throws ResolveException, IOException
     {
         Artifact artifact = new DefaultArtifact(GROUPID, ARTIFACTID, "classifier", "type",
             this.extensionIdClassifier.getVersion().getValue());
@@ -412,7 +419,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadBundle() throws ExtensionException, IOException
+    void downloadBundle() throws ExtensionException, IOException
     {
         Extension extension = this.repositoryManager.resolve(this.bundleExtensionId);
 
@@ -424,7 +431,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadBundleDependency() throws ResolveException, IOException
+    void downloadBundleDependency() throws ResolveException, IOException
     {
         Artifact artifact = new DefaultArtifact("groupid", "bundleartifactid", "", "bundle",
             this.bundleExtensionId.getVersion().getValue());
@@ -442,7 +449,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadMavenPlugin() throws ExtensionException, IOException
+    void downloadMavenPlugin() throws ExtensionException, IOException
     {
         Extension extension = this.repositoryManager.resolve(this.mavenpluginExtensionId);
 
@@ -454,7 +461,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadMavenPluginDependency() throws ResolveException, IOException
+    void downloadMavenPluginDependency() throws ResolveException, IOException
     {
         Artifact artifact = new DefaultArtifact("groupid", "mavenplugin", "", "jar",
             this.mavenpluginExtensionId.getVersion().getValue());
@@ -472,7 +479,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadWebjar() throws ResolveException, IOException
+    void downloadWebjar() throws ResolveException, IOException
     {
         Extension extension = this.repositoryManager.resolve(this.webjarExtensionId);
 
@@ -484,10 +491,10 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadWebjarDependency() throws ResolveException, IOException
+    void downloadWebjarDependency() throws ResolveException, IOException
     {
-        Artifact artifact =
-            new DefaultArtifact("wgroupid", "wartifactid", "", "webjar", webjarExtensionId.getVersion().getValue());
+        Artifact artifact = new DefaultArtifact("wgroupid", "wartifactid", "", "webjar",
+            this.webjarExtensionId.getVersion().getValue());
         Dependency aetherDependency = new Dependency(artifact, null);
         AetherExtensionDependency dependency = new AetherExtensionDependency(aetherDependency);
 
@@ -502,10 +509,10 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadWebjarDependencyAsJAR() throws ResolveException, IOException
+    void downloadWebjarDependencyAsJAR() throws ResolveException, IOException
     {
-        Artifact artifact =
-            new DefaultArtifact("wgroupid", "wartifactid", "", "jar", webjarExtensionId.getVersion().getValue());
+        Artifact artifact = new DefaultArtifact("wgroupid", "wartifactid", "", "jar",
+            this.webjarExtensionId.getVersion().getValue());
         Dependency aetherDependency = new Dependency(artifact, null);
         AetherExtensionDependency dependency = new AetherExtensionDependency(aetherDependency);
 
@@ -520,7 +527,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadRelocation() throws ExtensionException, IOException
+    void downloadRelocation() throws ExtensionException, IOException
     {
         Extension extension = this.repositoryManager.resolve(new ExtensionId("groupid:relocation", "version"));
 
@@ -530,7 +537,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testDownloadWithFileondifferentrepo() throws ExtensionException, IOException
+    void downloadWithFileondifferentrepo() throws ExtensionException, IOException
     {
         Extension extension =
             this.repositoryManager.resolve(new ExtensionId(GROUPID + ":fileondifferentrepo", "version"));
@@ -541,7 +548,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveVersions() throws ExtensionException
+    void resolveVersions() throws ExtensionException
     {
         IterableResult<Version> versions = this.repositoryManager.resolveVersions(this.extensionId.getId(), 0, -1);
 
@@ -551,7 +558,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveWithExternalParent() throws ResolveException
+    void resolveWithExternalParent() throws ResolveException
     {
         ExtensionId extensionId = new ExtensionId("lgroupid:lartifactid", "version");
 
@@ -561,14 +568,14 @@ public class AetherDefaultRepositoryManagerTest
         assertEquals(extensionId.getId(), extension.getId().getId());
         assertEquals(extensionId.getVersion(), extension.getId().getVersion());
         assertEquals("type", extension.getType());
-        assertEquals(this.repositoryUtil.getMavenRepositoryId(),
+        assertEquals("test-maven",
             extension.getRepository().getDescriptor().getId());
 
         assertEquals("parent description", extension.getSummary());
     }
 
     @Test
-    public void testResolveWithEmptyScmAndIssueManagement() throws ResolveException
+    void resolveWithEmptyScmAndIssueManagement() throws ResolveException
     {
         ExtensionId extensionId = new ExtensionId("groupid:emptyscmandissuemanagement", "version");
 
@@ -578,7 +585,7 @@ public class AetherDefaultRepositoryManagerTest
         assertEquals(extensionId.getId(), extension.getId().getId());
         assertEquals(extensionId.getVersion(), extension.getId().getVersion());
         assertEquals("type", extension.getType());
-        assertEquals(this.repositoryUtil.getMavenRepositoryId(),
+        assertEquals("test-maven",
             extension.getRepository().getDescriptor().getId());
 
         assertNull(extension.getIssueManagement());
@@ -586,17 +593,15 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveDependencyFromUnknownRepository() throws ResolveException, IOException
+    void resolveDependencyFromUnknownRepository() throws ResolveException, IOException
     {
         assertThrows(ResolveException.class,
             () -> this.repositoryManager.resolve(new ExtensionId("ugroupid:uartifactid", "version")));
 
         // Make sure to put a proper repository in the pom
-        File pomFile = new File(this.repositoryUtil.getMavenRepository(),
-            "eugroupid/euartifactid/version/euartifactid-version.pom");
+        File pomFile = new File(this.mavenRepository, "eugroupid/euartifactid/version/euartifactid-version.pom");
         String pom = FileUtils.readFileToString(pomFile, StandardCharsets.UTF_8);
-        pom = pom.replace("${{extension.repository.mavenunknown}}",
-            this.repositoryUtil.getMavenUnknownRepository().toURI().toString());
+        pom = pom.replace("${{extension.repository.mavenunknown}}", this.mavenUnknownRepository.toURI().toString());
         FileUtils.write(pomFile, pom, StandardCharsets.UTF_8);
 
         Extension extension = this.repositoryManager.resolve(new ExtensionId("eugroupid:euartifactid", "version"));
@@ -612,7 +617,7 @@ public class AetherDefaultRepositoryManagerTest
     }
 
     @Test
-    public void testResolveWithProfileActivation() throws ResolveException
+    void resolveWithProfileActivation() throws ResolveException
     {
         Extension extension = this.repositoryManager.resolve(new ExtensionId("groupid:profileactivation", "version"));
 
@@ -622,21 +627,24 @@ public class AetherDefaultRepositoryManagerTest
 
     // Failures
 
-    @Test(expected = ExtensionNotFoundException.class)
-    public void testResolveWithNotExistingVersion() throws ResolveException
+    @Test
+    void resolveWithNotExistingVersion()
     {
-        this.repositoryManager.resolve(new ExtensionId(this.extensionId.getId(), "noversion"));
+        assertThrows(ExtensionNotFoundException.class,
+            () -> this.repositoryManager.resolve(new ExtensionId(this.extensionId.getId(), "noversion")));
     }
 
-    @Test(expected = ExtensionNotFoundException.class)
-    public void testResolveNotExistingExtension() throws ResolveException
+    @Test
+    void resolveNotExistingExtension()
     {
-        this.repositoryManager.resolve(new ExtensionId("nogroupid:noartifactid", "noversion"));
+        assertThrows(ExtensionNotFoundException.class,
+            () -> this.repositoryManager.resolve(new ExtensionId("nogroupid:noartifactid", "noversion")));
     }
 
-    @Test(expected = ExtensionNotFoundException.class)
-    public void testResolveNotExistingExtensionVersions() throws ExtensionException
+    @Test
+    void resolveNotExistingExtensionVersions()
     {
-        this.repositoryManager.resolveVersions("nogroupid:noartifactid", 0, -1);
+        assertThrows(ExtensionNotFoundException.class,
+            () -> this.repositoryManager.resolveVersions("nogroupid:noartifactid", 0, -1));
     }
 }
