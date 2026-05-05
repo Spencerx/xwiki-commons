@@ -22,20 +22,23 @@ package org.xwiki.logging.logback.internal;
 import java.io.File;
 import java.util.Iterator;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xwiki.logging.LogLevel;
 import org.xwiki.logging.LogQueue;
-import org.xwiki.logging.event.LogQueueListener;
+import org.xwiki.logging.LoggerManager;
+import org.xwiki.logging.event.LoggerListener;
 import org.xwiki.logging.internal.tail.XStreamFileLoggerTail;
 import org.xwiki.observation.internal.DefaultObservationManager;
 import org.xwiki.test.XWikiTempDirUtil;
 import org.xwiki.test.annotation.ComponentList;
-import org.xwiki.test.mockito.MockitoComponentMockingRule;
+import org.xwiki.test.junit5.LogCaptureExtension;
+import org.xwiki.test.junit5.mockito.ComponentTest;
+import org.xwiki.test.junit5.mockito.InjectComponentManager;
+import org.xwiki.test.mockito.MockitoComponentManager;
 import org.xwiki.xstream.internal.SafeXStream;
 
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -44,13 +47,15 @@ import ch.qos.logback.core.filter.Filter;
 import ch.qos.logback.core.read.ListAppender;
 import ch.qos.logback.core.spi.FilterReply;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -60,6 +65,7 @@ import static org.mockito.Mockito.when;
  * @since 3.2M3
  */
 // @formatter:off
+@ComponentTest
 @ComponentList({
     DefaultLoggerManager.class,
     DefaultObservationManager.class,
@@ -67,11 +73,13 @@ import static org.mockito.Mockito.when;
     XStreamFileLoggerTail.class
 })
 // @formatter:on
-public class DefaultLoggerManagerTest
+class DefaultLoggerManagerTest
 {
-    @Rule
-    public final MockitoComponentMockingRule<DefaultLoggerManager> mocker =
-        new MockitoComponentMockingRule<>(DefaultLoggerManager.class);
+    @InjectComponentManager
+    private MockitoComponentManager componentManager;
+
+    @RegisterExtension
+    private LogCaptureExtension logCapture = new LogCaptureExtension(org.xwiki.test.LogLevel.WARN);
 
     private DefaultLoggerManager loggerManager;
 
@@ -81,8 +89,8 @@ public class DefaultLoggerManagerTest
 
     private LogbackUtils utils = new LogbackUtils();
 
-    @Before
-    public void setUp() throws Exception
+    @BeforeEach
+    void setUp() throws Exception
     {
         ch.qos.logback.classic.Logger rootLogger = this.utils.getRootLogger();
 
@@ -111,11 +119,13 @@ public class DefaultLoggerManagerTest
         rootLogger.addAppender(this.listAppender);
 
         this.logger = LoggerFactory.getLogger(getClass());
-        this.loggerManager = this.mocker.getComponentUnderTest();
+        // Get the component after adding the listAppender so that initialize() also applies ForbiddenThreadsFilter
+        // to the listAppender, which is required by tests that verify logs are not sent to it after pushLogListener()
+        this.loggerManager = this.componentManager.getInstance(LoggerManager.class);
     }
 
     @Test
-    public void testPushPopLogListener() throws InterruptedException
+    void pushPopLogListener() throws InterruptedException
     {
         this.logger.error("[test] before push");
 
@@ -124,7 +134,7 @@ public class DefaultLoggerManagerTest
 
         LogQueue queue = new LogQueue();
 
-        this.loggerManager.pushLogListener(new LogQueueListener("loglistenerid", queue));
+        this.loggerManager.pushLogListener(new LoggerListener("loglistenerid", queue));
 
         this.logger.error("[test] after push");
 
@@ -134,14 +144,7 @@ public class DefaultLoggerManagerTest
         // Make sure the log has not been sent to the logback appender
         assertEquals(1, this.listAppender.list.size());
 
-        Thread thread = new Thread(new Runnable()
-        {
-            @Override
-            public void run()
-            {
-                DefaultLoggerManagerTest.this.logger.error("[test] other thread");
-            }
-        });
+        Thread thread = new Thread(() -> this.logger.error("[test] other thread"));
         thread.start();
         thread.join();
 
@@ -178,20 +181,20 @@ public class DefaultLoggerManagerTest
     }
 
     @Test
-    public void testStackedListeners()
+    void stackedListeners()
     {
         this.logger.error("[test] before push");
 
         // Make sure the log has been sent to the logback appender
-        assertEquals("[test] before push", this.listAppender.list.get(0).getMessage());
+        assertEquals("[test] before push", this.listAppender.list.getFirst().getMessage());
 
         LogQueue queue1 = new LogQueue();
 
-        this.loggerManager.pushLogListener(new LogQueueListener("loglistenerid1", queue1));
+        this.loggerManager.pushLogListener(new LoggerListener("loglistenerid1", queue1));
 
         LogQueue queue2 = new LogQueue();
 
-        this.loggerManager.pushLogListener(new LogQueueListener("loglistenerid2", queue2));
+        this.loggerManager.pushLogListener(new LoggerListener("loglistenerid2", queue2));
 
         this.logger.error("[test] log queue2");
 
@@ -212,7 +215,7 @@ public class DefaultLoggerManagerTest
     }
 
     @Test
-    public void testNullListeners()
+    void nullListeners()
     {
         this.logger.error("[test] before push");
 
@@ -235,24 +238,23 @@ public class DefaultLoggerManagerTest
     }
 
     @Test
-    public void testGetSetLoggerLevel()
+    void getSetLoggerLevel()
     {
         assertNull(this.loggerManager.getLoggerLevel(getClass().getName()));
 
         LogQueue queue = new LogQueue();
 
-        this.loggerManager.pushLogListener(new LogQueueListener("loglistenerid", queue));
+        this.loggerManager.pushLogListener(new LoggerListener("loglistenerid", queue));
 
         this.loggerManager.setLoggerLevel(getClass().getName(), LogLevel.WARN);
         assertSame(LogLevel.WARN, this.loggerManager.getLoggerLevel(getClass().getName()));
 
         this.logger.debug("[test] debug message 1");
         // Provide information when the Assert fails
-        if (queue.size() > 0) {
-            Assert.fail("Should have contained no message but got [" + queue.peek().getFormattedMessage()
+        if (!queue.isEmpty()) {
+            fail("Should have contained no message but got [" + queue.peek().getFormattedMessage()
                 + "] instead (last message, there might be more)");
         }
-        assertEquals(0, queue.size());
 
         this.loggerManager.setLoggerLevel(getClass().getName(), LogLevel.DEBUG);
         assertSame(LogLevel.DEBUG, this.loggerManager.getLoggerLevel(getClass().getName()));
@@ -265,13 +267,13 @@ public class DefaultLoggerManagerTest
     }
 
     @Test
-    public void testGetLoggers()
+    void getLoggers()
     {
         assertNotNull(this.loggerManager.getLoggers());
     }
 
     @Test
-    public void initializeWhenNoLogback() throws Exception
+    void initializeWhenNoLogback() throws Exception
     {
         // Simulate that the Logging implementation is not Logback
         DefaultLoggerManager spyLoggerManager = spy(this.loggerManager);
@@ -279,12 +281,13 @@ public class DefaultLoggerManagerTest
 
         spyLoggerManager.initialize();
 
-        verify(this.mocker.getMockedLogger())
-            .warn("Could not find any Logback root logger. All logging module advanced features will be disabled.");
+        assertEquals(
+            "Could not find any Logback root logger. All logging module advanced features will be disabled.",
+            this.logCapture.getMessage(0));
     }
 
     @Test
-    public void getLoggerLevelWhenNoLogback() throws Exception
+    void getLoggerLevelWhenNoLogback()
     {
         // Simulate that the Logging implementation is not Logback
         DefaultLoggerManager spyLoggerManager = spy(this.loggerManager);
@@ -294,17 +297,16 @@ public class DefaultLoggerManagerTest
     }
 
     @Test
-    public void createLoggerTail() throws Exception
+    void createLoggerTail() throws Exception
     {
-        this.mocker.registerMockComponent(SafeXStream.class);
+        this.componentManager.registerMockComponent(SafeXStream.class);
 
         File logFile = new File(XWikiTempDirUtil.createTemporaryDirectory(), "log");
 
-        assertTrue(
-            !(this.loggerManager.createLoggerTail(logFile.toPath(), true) instanceof XStreamFileLoggerTail));
+        assertFalse(this.loggerManager.createLoggerTail(logFile.toPath(), true) instanceof XStreamFileLoggerTail);
 
-        assertTrue(this.loggerManager.createLoggerTail(logFile.toPath(), false) instanceof XStreamFileLoggerTail);
+        assertInstanceOf(XStreamFileLoggerTail.class, this.loggerManager.createLoggerTail(logFile.toPath(), false));
 
-        assertTrue(this.loggerManager.createLoggerTail(logFile.toPath(), true) instanceof XStreamFileLoggerTail);
+        assertInstanceOf(XStreamFileLoggerTail.class, this.loggerManager.createLoggerTail(logFile.toPath(), true));
     }
 }
