@@ -29,8 +29,8 @@
   </appender>
 
   <!-- It's important that we log with the same default values as the ones used at runtime, so that tests see what
-       is really printed at runtime. Thus tests should capture their output to not print anything in the console
-       and assert what's printed using the LogRule class. -->
+       is really printed at runtime. Thus, tests should capture their output to not print anything in the console
+       and assert what's printed. -->
 
   <logger name="org.xwiki" level="info"/>
   <logger name="com.xpn.xwiki" level="warn"/>
